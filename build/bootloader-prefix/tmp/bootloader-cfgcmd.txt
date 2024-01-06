@@ -1,0 +1,1 @@
+cmd='I:/.espressif/tools/cmake/3.24.0/bin/cmake.exe;-DSDKCONFIG=I:/eclipse-workspace/scan/sdkconfig;-DIDF_PATH=I:/.espressif/frameworks/esp-idf-v5.1.2;-DIDF_TARGET=esp32;-DPYTHON_DEPS_CHECKED=1;-DPYTHON=python;-DEXTRA_COMPONENT_DIRS=I:/.espressif/frameworks/esp-idf-v5.1.2/components/bootloader;-DPROJECT_SOURCE_DIR=I:/eclipse-workspace/scan;-GNinja;<SOURCE_DIR><SOURCE_SUBDIR>'
