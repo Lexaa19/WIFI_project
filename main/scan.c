@@ -12,13 +12,16 @@
 */
 #include <string.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
-
+// Configured in Kconfig.projbuild to have the size of 20.
 #define DEFAULT_SCAN_LIST_SIZE CONFIG_EXAMPLE_SCAN_LIST_SIZE
+#define MAX_TRIES 3
+#define RETRY_DELAY_MS 500
 
 static const char *TAG = "scan";
 
@@ -132,37 +135,66 @@ static void print_cipher_type(int pairwise_cipher, int group_cipher)
         break;
     }
 }
+/*
+ *  Create and configure a default Wi-Fi station (STA) network interface.
+ *  It initializes the necessary components and settings for the device to connect as a station to a Wi-Fi network.
+ */
+bool isWifiSTAInitialized() {
+    esp_netif_t *sta_netif = NULL;
 
-/* Initialize Wi-Fi as sta and set scan method */
-static void wifi_scan(void)
-{
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
-    assert(sta_netif);
+    for (int try_count = 0; try_count < MAX_TRIES; ++try_count) {
+        sta_netif = esp_netif_create_default_wifi_sta();
+
+        if (sta_netif) {
+            break;  // Interface created successfully, exit loop
+        }
+
+        ESP_LOGW(TAG, "Failed to create WiFi STA interface. Retrying... (Attempt %d/%d)", try_count + 1, MAX_TRIES);
+
+        // Pause the task for 50 ticks, providing a delay of 500 milliseconds.
+        vTaskDelay(RETRY_DELAY_MS / portTICK_PERIOD_MS);
+    }
+
+    if (!sta_netif) {
+        ESP_LOGE(TAG, "Failed to create initial WiFi STA interface after %d attempts. Exiting program.", MAX_TRIES);
+        esp_restart();
+    }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
+    return true;
+}
+
+/* Initialize Wi-Fi as sta and set scan method */
+static void wifi_scan(void)
+{
+	// Initializes the TCP/IP network interface layer. (to enable network functionality).
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    assert(isWifiSTAInitialized());
+
     uint16_t number = DEFAULT_SCAN_LIST_SIZE;
-    wifi_ap_record_t ap_info[DEFAULT_SCAN_LIST_SIZE];
-    uint16_t ap_count = 0;
-    memset(ap_info, 0, sizeof(ap_info));
+
+    wifi_ap_record_t scanned_access_points_info[DEFAULT_SCAN_LIST_SIZE];
+    uint16_t access_point_counter = 0;
+    memset(scanned_access_points_info, 0, sizeof(scanned_access_points_info));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     esp_wifi_scan_start(NULL, true);
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&number, ap_info));
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_count));
-    ESP_LOGI(TAG, "Total APs scanned = %u", ap_count);
-    for (int i = 0; (i < DEFAULT_SCAN_LIST_SIZE) && (i < ap_count); i++) {
-        ESP_LOGI(TAG, "SSID \t\t%s", ap_info[i].ssid);
-        ESP_LOGI(TAG, "RSSI \t\t%d", ap_info[i].rssi);
-        print_auth_mode(ap_info[i].authmode);
-        if (ap_info[i].authmode != WIFI_AUTH_WEP) {
-            print_cipher_type(ap_info[i].pairwise_cipher, ap_info[i].group_cipher);
+    ESP_LOGI(TAG, "Max AP number ap_info can hold = %u", number);
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&number, scanned_access_points_info));
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&access_point_counter));
+    ESP_LOGI(TAG, "Total APs scanned = %u, actual AP number ap_info holds = %u", access_point_counter, number);
+    for (int i = 0; i < number; i++) {
+        ESP_LOGI(TAG, "SSID \t\t%s", scanned_access_points_info[i].ssid);
+        ESP_LOGI(TAG, "RSSI \t\t%d", scanned_access_points_info[i].rssi);
+        print_auth_mode(scanned_access_points_info[i].authmode);
+        if (scanned_access_points_info[i].authmode != WIFI_AUTH_WEP) {
+            print_cipher_type(scanned_access_points_info[i].pairwise_cipher, scanned_access_points_info[i].group_cipher);
         }
-        ESP_LOGI(TAG, "Channel \t\t%d\n", ap_info[i].primary);
+        ESP_LOGI(TAG, "Channel \t\t%d", scanned_access_points_info[i].primary);
     }
 
 }
@@ -178,4 +210,6 @@ void app_main(void)
     ESP_ERROR_CHECK( ret );
 
     wifi_scan();
+
+    //assert(isWifiSTAInitialized());
 }
